@@ -1,6 +1,6 @@
 #![allow(unused_assignments)]
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use bytes::Bytes;
 use http::Method;
 use serde_json::json;
@@ -10,18 +10,24 @@ use spin_sdk::{
 };
 use uuid::Uuid;
 
-const REDIS_ADDRESS_ENV: &str = "REDIS_URL";
+const REDIS_URL_ENV: &str = "REDIS_URL_ENV";
+const CHANNEL_GATE2VIN: &str = "gate2vin";
+const CHANNEL_VIN2WORKER: &str = "vin2worker";
 
 /// A simple Spin HTTP component.
 #[http_component]
 fn http_gate(req: Request) -> Result<Response> {
     println!("req: {:?}", req);
 
-    let redis_addr = std::env::var(REDIS_ADDRESS_ENV)?;
+    let redis_addr = std::env::var(REDIS_URL_ENV)?;
     println!("redis_addr is: {}", redis_addr);
 
     let uri = req.uri();
     let path = uri.path().to_owned();
+    let proto_name = parse_proto_name(&path);
+    if &proto_name == "" {
+        bail!("proto_name is empty.");
+    }
 
     let mut method = String::new();
     let mut reqdata: Option<String> = None;
@@ -81,6 +87,7 @@ fn http_gate(req: Request) -> Result<Response> {
     // here, we just put entire path content to action field, for later cases
     // we can parse it to model and action parts
     let json_to_send = json!({
+        "proto": proto_name,
         "model": path,
         "action": &method,
         "data": payload.to_string().as_bytes().to_vec(),
@@ -91,14 +98,15 @@ fn http_gate(req: Request) -> Result<Response> {
         // send to subxt proxy to handle
         _ = redis::publish(
             &redis_addr,
-            "spin2proxy",
+            CHANNEL_GATE2VIN,
             &serde_json::to_vec(&json_to_send).unwrap(),
         );
     } else if &method == "query" {
+        let channel = format!("{}:{}", CHANNEL_VIN2WORKER, proto_name);
         // send to spin_redis_worker to handle
         _ = redis::publish(
             &redis_addr,
-            "proxy2spin",
+            &channel,
             &serde_json::to_vec(&json_to_send).unwrap(),
         );
     }
@@ -113,14 +121,12 @@ fn http_gate(req: Request) -> Result<Response> {
         //println!("check result: {:?}", result);
 
         if status_code.is_empty() {
-            // after 20 seconds, timeout
-            if loop_count < 2000 {
+            // after 30 seconds, timeout
+            if loop_count < 6000 {
                 // if not get the result, sleep for a little period
-                let ten_millis = std::time::Duration::from_millis(10);
-                std::thread::sleep(ten_millis);
+                let delta_millis = std::time::Duration::from_millis(5);
+                std::thread::sleep(delta_millis);
                 loop_count += 1;
-
-                //println!("loop continue {}...", loop_count);
             } else {
                 println!("timeout, return 408");
                 // timeout handler, use which http status code?
@@ -144,9 +150,17 @@ fn http_gate(req: Request) -> Result<Response> {
             // jump out this loop, and return the response to user
             return Ok(http::Response::builder()
                 .status(status_code)
-                .header("eightfish_version", "0.1")
+                .header("ef-http-gate-version", "1.0")
                 .header("Access-Control-Allow-Origin", "*")
                 .body(Some(Bytes::from(res_body)))?);
         }
     }
+}
+
+fn parse_proto_name(url: &str) -> String {
+    url.trim_start_matches('/')
+        .split('/')
+        .next()
+        .unwrap_or("")
+        .to_string()
 }
