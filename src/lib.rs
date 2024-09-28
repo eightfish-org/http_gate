@@ -117,7 +117,8 @@ fn http_gate(req: Request) -> Result<impl IntoResponse> {
             let res_body = redis_conn
                 .get(&format!("cache:{reqid}"))
                 .map_err(|_| anyhow!("Error querying Redis"))?;
-            let res_body = res_body.expect("empty response body.");
+            println!("http response: {status_code:?} {res_body:?}");
+            let res_body = res_body.ok_or(anyhow!("empty http response"))?;
             // clear the redis cache key of the worker result
             let _ = redis_conn.del(&[format!("cache:status:{reqid}")]);
             let _ = redis_conn.del(&[format!("cache:{reqid}")]);
