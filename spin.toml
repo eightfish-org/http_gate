@@ -7,11 +7,12 @@ name = "http-gate"
 version = "0.2.0"
 
 [[trigger.http]]
-route = "/"
+route = "/..."
 component = "http-gate"
 
 [component.http-gate]
 source = "target/wasm32-wasi/release/http_gate.wasm"
+allowed_outbound_hosts = ["redis://127.0.0.1:6379"]
 
 [component.http-gate.build]
 command = "cargo build --target wasm32-wasi --release"

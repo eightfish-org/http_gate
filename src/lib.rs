@@ -78,7 +78,7 @@ fn http_gate(req: Request) -> Result<impl IntoResponse> {
         "reqid": reqid,
         "reqdata": reqdata,
     });
-    log::info!("payload: {:?}", payload);
+    println!("payload: {:?}", payload);
 
     // construct a json, serialize it and send to a redis channel
     // model and action, we can plan a scheme to parse them out
@@ -132,14 +132,14 @@ fn http_gate(req: Request) -> Result<impl IntoResponse> {
                 .body(res_body)
                 .build());
         } else {
-            // after 30 seconds, timeout
-            if loop_count < 6000 {
+            // after 20 seconds, timeout
+            if loop_count < 4000 {
                 // if not get the result, sleep for a little period
                 let delta_millis = std::time::Duration::from_millis(5);
                 std::thread::sleep(delta_millis);
                 loop_count += 1;
             } else {
-                log::info!("timeout, return 408");
+                println!("timeout, return 408");
                 // timeout handler, use http status code
                 return Ok(Response::builder()
                     .status(408)
