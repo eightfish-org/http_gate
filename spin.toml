@@ -6,13 +6,16 @@ description = "http gate."
 name = "http-gate"
 version = "0.2.0"
 
+[variables]
+redis_host = { required = true }  # will be filled out in ENV
+
 [[trigger.http]]
 route = "/..."
 component = "http-gate"
 
 [component.http-gate]
 source = "target/wasm32-wasi/release/http_gate.wasm"
-allowed_outbound_hosts = ["redis://127.0.0.1:6379"]
+allowed_outbound_hosts = ["redis://{{redis_host}}"]
 
 [component.http-gate.build]
 command = "cargo build --target wasm32-wasi --release"
