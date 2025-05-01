@@ -31,7 +31,7 @@ fn http_gate(req: Request) -> Result<impl IntoResponse> {
     let mut reqdata: Option<String> = None;
     match req.method() {
         http::Method::Get => {
-            method = "query".to_owned();
+            method = "get".to_owned();
 
             // In query mode: data is the url params
             let query_params = req.query();
@@ -51,10 +51,26 @@ fn http_gate(req: Request) -> Result<impl IntoResponse> {
                 reqdata = Some(bo.to_string());
             }
         }
+        http::Method::Put => {
+            method = "put".to_owned();
+
+            // In post mode: data is the body content of the request
+            let body = req.body();
+            if body.is_empty() {
+                reqdata = None;
+            } else {
+                let bo = String::from_utf8_lossy(body);
+                reqdata = Some(bo.to_string());
+            }
+        }
+        http::Method::Delete => {
+            method = "delete".to_owned();
+            reqdata = None;
+        }
         http::Method::Options => {
             return Ok(Response::builder()
                 .status(200)
-                .header("http_gate_version", "0.2")
+                .header("ef-http-gate-version", "1.0")
                 .header("Access-Control-Allow-Origin", "*")
                 .header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
                 .header("Access-Control-Allow-Headers", "X-PINGOTHER, Content-Type")
@@ -63,7 +79,7 @@ fn http_gate(req: Request) -> Result<impl IntoResponse> {
         }
         _ => {
             // handle cases of other directives
-            return Ok(Response::builder().status(500).body("No data").build());
+            return Ok(Response::builder().status(500).body("Nonsense HTTP method.").build());
         }
     };
 
@@ -92,19 +108,24 @@ fn http_gate(req: Request) -> Result<impl IntoResponse> {
         "ext": Vec::<u8>::new(),
     });
 
-    if &method == "post" {
-        // send to subxt proxy to handle
-        _ = redis_conn.publish(
-            CHANNEL_GATE2VIN,
-            &serde_json::to_vec(&json_to_send).unwrap(),
-        );
-    } else if &method == "query" {
-        let channel = format!("{}:{}", CHANNEL_VIN2WORKER, proto_name);
-        // send to spin_redis_worker to handle
-        _ = redis_conn.publish(&channel, &serde_json::to_vec(&json_to_send).unwrap());
+    // send data to inner flow
+    match req.method() {
+        http::Method::Get => {
+            let channel = format!("{}:{}", CHANNEL_VIN2WORKER, proto_name);
+            // send to spin_redis_worker to handle
+            _ = redis_conn.publish(&channel, &serde_json::to_vec(&json_to_send).unwrap());
+        }
+        http::Method::Post | http::Method::Put | http::Method::Delete => {
+            // send to subxt proxy to handle
+            _ = redis_conn.publish(
+                CHANNEL_GATE2VIN,
+                &serde_json::to_vec(&json_to_send).unwrap(),
+            );
+        }
     }
 
-    let mut loop_count = 1;
+    // loop to checkout the result returned from the inner flow
+    let mut loop_count = 0;
     loop {
         let status_code = redis_conn
             .get(&format!("cache:status:{reqid}"))
